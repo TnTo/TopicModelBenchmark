@@ -1,0 +1,55 @@
+version: '3.6'
+
+services:
+
+  mongo:
+    image: mongo
+    ports:
+      - 127.0.0.1:27017:27017
+    restart: on-failure
+    env_file: .env
+    volumes:
+      - type: bind
+        source: ./mongo
+        target: /data/db
+
+  mongo-express:
+    image: mongo-express
+    ports:
+      - 127.0.0.1:8088:8081
+    restart: on-failure
+    env_file: .env
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://$MONGO_INITDB_ROOT_USERNAME:$MONGO_INITDB_ROOT_PASSWORD@mongo:27017/
+    depends_on:
+      - mongo
+
+  omniboard:
+    image: vivekratnavel/omniboard:latest
+    command: ["--mu", "mongodb://$MONGO_INITDB_ROOT_USERNAME:$MONGO_INITDB_ROOT_PASSWORD@mongo:27017/$MONGO_DATABASE?authSource=admin"]
+    ports:
+      - 127.0.0.1:9000:9000
+    restart: on-failure
+    env_file: .env
+    depends_on:
+      - mongo
+
+  sacred:
+    build: docker
+    ports:
+      - 127.0.0.1:8787:8787
+    env_file: .env
+    depends_on: 
+      - mongo
+    volumes:
+      - type: bind
+        source: ./script
+        target: /script
+      - type: bind
+        source: ./data
+        target: /data
+      - type: bind
+        source: ./adso
+        target: /adso
+    environment:
+      - PYTHONUNBUFFERED=1

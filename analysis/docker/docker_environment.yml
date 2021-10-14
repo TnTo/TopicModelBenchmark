@@ -1,0 +1,14 @@
+name: adso
+channels:
+  - conda-forge
+dependencies:
+  - git
+  - gitpython
+  - xorg-libxcursor
+  - xorg-libxdamage
+  - xorg-libxcomposite
+  - xorg-libxrandr
+  - xorg-libxinerama
+  - xorg-libxext
+  - xorg-libxfixes
+  - xorg-libxi

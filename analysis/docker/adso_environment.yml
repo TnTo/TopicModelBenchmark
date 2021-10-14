@@ -1,0 +1,31 @@
+name: adso
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.7
+  - pathlib
+  - numpy
+  - dask >= 2021.5
+  - dask-ml
+  - zarr
+  - more-itertools
+  - scikit-learn >= 0.22
+  - nltk
+  - sparse
+  - dill
+  - pyldavis
+  - pandas
+  - openpyxl
+  - gensim
+  - requests
+  # only conda
+  - graph-tool
+  - topicmapping
+  - mallet
+  - hdbscan
+  - umap-learn
+  # pip
+  - pip
+  - pip:
+      - tomotopy
+      - numba-plsa>=0.0.2

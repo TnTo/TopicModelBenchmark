@@ -1,0 +1,2 @@
+*.net filter=lfs diff=lfs merge=lfs -text
+*.mallet.out filter=lfs diff=lfs merge=lfs -text

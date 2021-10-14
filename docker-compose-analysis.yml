@@ -1,0 +1,21 @@
+version: '3.6'
+
+services:
+
+  jupyter:
+    build: analysis/docker
+    ports:
+      - 127.0.0.1:9999:8888
+      - 127.0.0.1:8788:8787
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+      - type: bind
+        source: ./adso
+        target: /adso
+      - type: bind
+        source: ./analysis
+        target: /analysis
+    environment:
+        - PYTHONUNBUFFERED=1

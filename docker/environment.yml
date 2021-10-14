@@ -1,0 +1,11 @@
+name: adso
+channels:
+  - conda-forge
+dependencies:
+  # extra
+  - pymongo
+  - mongodb
+  - pip
+  - pip:
+      - sacred
+      - git+https://github.com/tnto/adso.git
