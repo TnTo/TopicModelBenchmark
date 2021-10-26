@@ -148,4 +148,4 @@ analysis/*
 !analysis/docker
 !analysis/docker/*
 !analysis/data.py
-!analysis/report.md
+!analysis/report.Rmd

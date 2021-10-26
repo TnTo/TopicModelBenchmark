@@ -1,0 +1,288 @@
+---
+title: "Report preliminare - Benchmark di algoritmi per Topic Modeling"
+author: "Michele Ciruzzi"
+output:
+    pdf_document:
+        keep_tex: yes
+        toc: true
+    html_document:
+        keep_md: true
+        toc: true
+---
+
+```{r setup, include=FALSE, echo=FALSE, tydy=TRUE, comment=""}
+library(reticulate)
+use_condaenv("topicmodelbenchmark")
+```
+
+```{python, echo=FALSE, comment=""}
+import os
+import pickle
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+sns.set_style("whitegrid")
+sns.set(font_scale=2)
+try:
+    os.mkdir("plot")
+except FileExistsError:
+    pass
+
+order = ['NMF', 'LDAVB', 'LDAVBlong', 'LDAGS', 'LDAGSlong', 'HDPVB', 'HDPGS', 'TM', 'hSBM']
+parametric = ['NMF', 'LDAVB', 'LDAVBlong', 'LDAGS', 'LDAGSlong']
+nonparametric = ["HDPVB", "HDPGS", "TM"]
+hierarchical = ["hSBM"]
+palette='tab10'
+```
+
+## Prelude
+
+* NMI is the normalized mutual information
+* SoftNMi is an extension of NMI for softclustering as defined by Lei, Y., Bezdek, J. C., Chan, J., Xuan Vinh, N., Romano, S., & Bailey, J. (2014). Generalized information theoretic cluster validity indices for soft clusterings. 2014 IEEE Symposium on Computational Intelligence and Data Mining (CIDM), 24–31. https://doi.org/10.1109/CIDM.2014.7008144
+* autoNMI is computed against another model instead of against the labels
+
+## Datasets
+```{python, echo=FALSE, comment="", cache=TRUE, results='asis'}
+dataset = pickle.load(open('data/dataset.pkl', 'rb'))
+dataset = dataset[['config_dataset_name', 'D', 'W', 'nL', 'n']]
+dataset = dataset.rename(columns={'config_dataset_name':'Dataset','D':'#Documents','W':'#Words','nL':'#Labels', 'n':'#Tokens'})
+print(dataset.to_markdown(index=False))
+```
+
+## Time
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+pd.set_option('mode.chained_assignment', None)
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[['config_model_name', 'config_dataset_name', 'time']]
+df.time = df.time/60
+df = df[df.config_dataset_name != 'wos2']
+df=df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'time':'Time'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, row='Dataset', height=5, aspect=3, margin_titles=True, sharex=False, legend_out=True)
+g = g.map(sns.boxplot, 'Time', 'Algorithm', order=order, palette='tab10')
+g.set_xlabels('Time (min)')
+```
+
+hSBM appears to be consistently slower than the other methods on wos dataset. Similarly, both hSBM and TM appear to be slower on 20newsgrops dataset.
+
+For hSBM the conversion into our custom format to store the topic model is really time-consuming and probably could be optimized (e.g. by parallelizing the code). On the other side, this is the only hierarchical algorithm, which means that it fits multiple topic models at the same time, making the loss of speed sometime acceptable.
+
+TM requires a pruning of the graph which is time-consuming and not parallelized nor cached in the implementation used. A sketch of a parallelized and cacheable version is provided alongside the original code, but it is not integrated in the binary executable.
+
+TM and hSBM are the only non-parallelized algorithms: in order to parallelize TM it is necessary to switch from the standard version of InfoMap clustering algorithm to a parallel (and less accurate) one; for hSBM it is necessary to reimplement the whole MCMC inference with another library capable of parallelism (even though it is not assured that a parallel implementation will be faster without requiring too much RAM).
+
+The times showed are for the single fit, so for parametric algorithms they have to be multiplied by the number of numbers of topics to be considered.
+
+Finally, the right side outliers, where present, can be caused by the conversion of the dataset in the necessary format (which is cached after the first time).
+
+## Goodness of fit
+
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'nmi', 'softnmi']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed', 'nmi':'NMI', 'softnmi':'SoftNMI'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+df = df.groupby(['Dataset', 'Algorithm', 'Seed']).max().reset_index(drop=False)
+df = df.melt(id_vars=['Dataset', 'Algorithm', 'Seed'])
+g = sns.FacetGrid(df, row='Dataset', col='variable', height=5, aspect=2, margin_titles=True, sharex=False, legend_out=True)
+g = g.map(sns.boxplot, 'value', 'Algorithm', order=order, palette='tab10')
+g.set_xlabels('')
+```
+
+The maximum value for each seed has been considered: these are the best level for hierarchical algorithms and the best number of topics for parametric algorithms.
+
+The Gibbs Sampling (i.e. MCMC) versions of both LDA and HDP appear to be more accurate to infer the topic structure of the dataset than the variational versions (VB) in quite every context.
+The comparison between NMI and SoftNMI suggests us that the increased number of iterations in LDAGSlonger, as compared to LDAGS, (and partially also for LDAVBlong respect to LDAVB) produces a more clear classification (i.e. the probability distribution is more skewed towards one of the vertices of the simplex).
+
+TM and NMF show very good consistency in the results while HDPGS and hSBM show the greater variability.
+
+20newsgoups has 20 different labels to be predicted and LDA gives the better results, while HDP, TM and hSBM give still good results (particularly in terms of SoftNMI). WoS has 7 labels and hSBM performs poorly as compared to the other algorithms, while it outperforms every other algorithm for the WoS2 dataset with 143 labels.
+This could suggest avoiding hSBM where very few topics are to be inferred, while it can be a very useful tool when a rich fine-grained description is needed.
+
+## Reproducibility
+
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/auto.pkl', 'rb'))
+dfrev = pickle.load(open('data/rev.pkl', 'rb'))
+dfrev = dfrev.rename(columns={'reverseautonmi':'autonmi', 'reverseautosoftnmi':'autosoftnmi'})
+dfrev = dfrev[['config_model_name', 'config_dataset_name', 'autonmi', 'autosoftnmi']]
+dfrev['config_model_name'] = dfrev['config_model_name'].replace(to_replace='hSBMv2', value='hSBMv2Rev')
+df = df[['config_model_name', 'config_dataset_name', 'autonmi', 'autosoftnmi']]
+df = df.append(dfrev)
+df = df[df.config_dataset_name != 'wos2']
+df = df[df['config_model_name'] != 'hSBMv2']
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'autonmi':'autoNMI', 'autosoftnmi':'autoSoftNMI'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2Rev':'hSBM'}})
+df = df.melt(id_vars=['Dataset', 'Algorithm'])
+g = sns.FacetGrid(df, row='Dataset', col='variable', height=5, aspect=2, margin_titles=True, sharex=False, legend_out=True)
+g = g.map(sns.boxplot, 'value', 'Algorithm', order=order, palette='tab10')
+g.set_xlabels('')
+```
+
+Looking at autoNMI emerge the high degree of reproducibility of TM. At the same time, the GS versions of HDP and LDA as well as NMF still achieve a good level of reproducibility, even if lower than TM.
+
+On the other hand, I'm not sure about how to interpret the right plots: TM still have small error bars (i.e. are all differents in the same way) but HDPGS achieve better results (maybe predicts skewer probabilities?).
+
+hSBM (we will see more later) gives a different number of levels in each run, which makes the coupling problematic and lowers the results: I choose to start with the root level (minimum number of clusters) and coupling counting from it.
+
+## Parametric algorithms
+
+### LogLikelihood vs Perplexity
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_model_name.isin(parametric)]
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'll', 'perpl']]
+df = df[df.config_dataset_name != 'wos2']
+df = df[df.config_model_name.isin(['LDAVB', 'LDAVBlong'])]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed','ll':'LogLikelihood', 'perpl':'Perplexity'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, row='Algorithm', col='Dataset', hue='Seed', height=5, aspect=2, sharey=False, legend_out=True, margin_titles=True, sharex=False)
+g.map(sns.lineplot, 'Perplexity', 'LogLikelihood') 
+```
+
+First we note that the perplexity, a common used measure, is monotonically decreasing with the likelihood of the model, and so they can be considered as equivalent.
+We will use the loglikelihood.
+
+### NMI vs #Topics
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_model_name.isin(parametric + ['LDAGSlonger'])]
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'config_n_topic', 'nmi']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed', 'config_n_topic':'#Topics', 'nmi':'NMI'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, row='Algorithm', col='Dataset', hue='Seed', height=5, aspect=1.3, sharey=False, legend_out=True, row_order=parametric, margin_titles=True)
+g.map(sns.lineplot, '#Topics', 'NMI')
+```
+Second, we note that for NMF and the two versions of LDAGS NMI has a similar shape for every random seed.
+Moreover for these three algorithms, NMI has a maximum for a given number of topics which is generally close to the number of labels to be predicted.
+
+### GoF (Error or LogLikelihood) vs #Topics
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_model_name.isin(parametric + ['LDAGSlonger'])]
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'config_n_topic', 'll']]
+df = df[df.config_dataset_name != 'wos2']
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed', 'config_n_topic':'#Topics', 'll':'GoF'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, row='Algorithm', col='Dataset', hue='Seed', height=5, aspect=2, sharey=False, legend_out=True, row_order=parametric, margin_titles=True)
+g.map(sns.lineplot, '#Topics', 'GoF')
+```
+For NMF and the two versions of LDAVB the correlation between the loglikelihood and the NMI (i.e unsupervised and supervised goodness of fit) is (almost perfectly) linear and so we have no way in a supervised setting to infer the optimal number of topic using unsupervised metrics.
+But, for LDAGS and particularly LDAGSlonger there is a clear minimum which could be a way to define an optimal number of topics, even if it requires to fit a certain number of models to find the minimum.
+It is important to highlight that this number of topics is quite different from the number of labels.
+
+### GoF (Error or LogLikelihood) vs NMI
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_model_name.isin(parametric + ['LDAGSlonger'])]
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'nmi', 'll']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed', 'nmi':'NMI', 'll':'GoF'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, row='Algorithm', col='Dataset', hue='Seed', height=5, aspect=1.3, sharey=False, legend_out=True, row_order=parametric, margin_titles=True, sharex=False)
+g.map(sns.scatterplot, 'NMI', 'GoF', s=30)
+```
+This relation should be further explored, since for some combination of datasets and algorithms this relation is clearly U-shaped (or C-shaped).
+
+It suggests that the number of topics considered optimal by the model is not that same a human who classifies the corpus would use.
+
+### Assigned #Topics
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_model_name.isin(parametric + ['LDAGSlonger'])]
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'config_n_topic', 'ant']]
+df = df[df.config_dataset_name != 'wos2']
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed', 'config_n_topic':'#Topics', 'ant':'Assigned#Topics'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, row='Algorithm', col='Dataset', hue='Seed', height=5, aspect=2, sharey=False, legend_out=True, row_order=parametric, margin_titles=True)
+g.map(sns.lineplot, '#Topics', 'Assigned#Topics')
+```
+We can exclude that this could be a good metrics to chose the optimal number of topics.
+
+## #Topics
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_dataset_name != 'wos2']
+df = df[df.config_model_name.isin(nonparametric)]
+df = df[['config_model_name', 'config_dataset_name', 'config_adso_seed', 'ant']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_model_name':'Algorithm', 'config_adso_seed':'Seed', 'ant':'Assigned#Topics'})
+df = df.replace({'Algorithm':{'hSBMv2':'hSBM'}})
+g = sns.FacetGrid(df, col='Dataset', height=5, aspect=2, margin_titles=True, sharey=False, legend_out=True)
+g = g.map(sns.boxplot, 'Algorithm', 'Assigned#Topics', order=nonparametric, palette='tab10')
+g.set_xlabels('')
+# sns.catplot(data=df, row='Dataset', col='variable', hue='Algorithm', height=5, aspect=2, sharey=False, legend_out=True, margin_titles=True, x='Seed', y='value', ci=None, kind='point')
+```
+
+HDPGS and TM show a very good accordance in the number of topics inferred. However, HDPGS assigns documents to a (slighty) lower number of first topics.
+LDAGS is coherent among different seeds, but gives different results from HDPGS and TM.
+
+We note that also for non-parametric algorithms the number of topics predicted is not in accordance with the manually defined number of labels.
+
+## Hierarchical
+
+### #Topics
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/df.pkl', 'rb'))
+df = df[df.config_model_name == 'hSBMv2']
+df = df[df.config_dataset_name != 'wos2']
+df = df[['config_dataset_name', 'config_adso_seed', 'plotlevel', 'nt', 'ant']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'config_adso_seed':'Seed', 'nt':'#Topics', 'ant':'Assigned#Topics', 'plotlevel':'Level'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+df = df.melt(id_vars=['Dataset', 'Seed', 'Level'])
+g = sns.catplot(data=df, row='Dataset', col='variable', hue='Seed', height=5, aspect=2, sharey='row', legend_out=True, margin_titles=True, x='Level', y='value', ci=None, kind='point', legend=False)
+for a in g.axes.ravel():
+    a.set_yscale('log')
+g
+```
+The number of topics is comparable to the other non-parametric methods if we consider the first, second or third levels.
+The usefulness of the deeper level has to be demonstrated, since the number of topics inferred in them reaches the same magnitude of the number of documents.
+
+### Reproducibility
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/auto.pkl', 'rb'))
+df = df[df.config_model_name == 'hSBMv2']
+df = df[['config_dataset_name', 'plotlevel', 'autonmi', 'autosoftnmi']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'autonmi':'autoNMI', 'autosoftnmi':'autoSoftNMI', 'plotlevel':'Level'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+df = df.melt(id_vars=['Dataset', 'Level'])
+sns.catplot(data=df, row='Dataset', col='variable', height=5, aspect=2, sharey='row', legend_out=True, margin_titles=True, x='Level', y='value', ci=None, kind='box', legend=False)
+```
+```{python, echo=FALSE, comment="", cache=TRUE}
+plt.clf()
+df = pickle.load(open('data/rev.pkl', 'rb'))
+df = df[df.config_model_name == 'hSBMv2']
+df = df[['config_dataset_name', 'level', 'reverseautonmi', 'reverseautosoftnmi']]
+df = df.rename(columns={'config_dataset_name':'Dataset', 'reverseautonmi':'autoNMI', 'reverseautosoftnmi':'autoSoftNMI', 'level':'Level'})
+df = df.replace({'Algorithm':{'LDAGSlonger':'LDAGSlong', 'hSBMv2':'hSBM'}})
+df = df.melt(id_vars=['Dataset', 'Level'])
+sns.catplot(data=df, row='Dataset', col='variable', height=5, aspect=2, sharey='row', legend_out=True, margin_titles=True, x='Level', y='value', ci=None, kind='box', legend=False)
+```
+Only the first levels appear for every seed, so the increase of reproducibility in the deeper levels can be an artifact given by the lower numerosity.
+
+## Conclusions
+
+NMF and the two versions of LDAVB have the huge downside that it is not possible to find the optimal number of topics in an unsupervised setting, and so the choice of the actual model is arbitrary.
+
+Also, variational implementations of LDA and HDP perform worse than the Gibbs Sampling ones.
+
+hSBM shows better results in the deeper levels, which have more than one hundred different topics predicted. Moreover, the numbers of levels and topics vary a lot among the random seeds. Finally, the model perform better when the clusters of documents are considered, which is an orthogonal interpretative approach to the other models.
+
+TM shows an incredible level of consistency among different random seeds.
+
+At the end of this assessment, the three possible choices are LDAGSlonger, TM and HDPGS: the reason to prefer HDPGS is the better reproducibility score in terms of softNMI; LDAGSlonger reaches better NMI results but requires to fit multiple models to find a minimum; TM shows good reproducibility. But as longer versions of LDA improve the SoftNMI of shorter versions of LDA, it is reasonable to hypothesize that with an increased number of iterations for the LDA step of TM, SoftNMI can improve as well.
+
+Finally, the worst results of HDPGS and TM are for the WoS2 dataset, which have a really high number of labels to be predicted (more than one hundred): if the aim of the topic model is to synthesize information in a manageable number of topics, the underestimation of the number of topics should be considered as a positive rather that a negative side effect.
+
+All considered, I suggest adopting TM as the topic model algorithm of choice for the analysis of the dataset.
